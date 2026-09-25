@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<robot name="rm_gimbal"
+  xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- ========== 参数配置 ========== -->
+  <!-- 相机相对云台的安装位置 -->
+  <xacro:arg name="camera_xyz" default="0.10 0 0.05" />
+  <xacro:arg name="camera_rpy" default="0 0 0" />
+  
+  <!-- 云台关节角度限制（弧度） -->
+  <xacro:arg name="yaw_limit" default="3.14159" />    <!-- ±180° -->
+  <xacro:arg name="pitch_limit" default="1.0472" />   <!-- ±60° -->
+  
+  <!-- 关节速度和力矩限制 -->
+  <xacro:arg name="joint_velocity" default="2.0" />
+  <xacro:arg name="joint_effort" default="100.0" />
+
+  <!-- ========== 颜色/外观定义（可选，用于RViz可视化） ========== -->
+  <material name="base_material">
+    <color rgba="0.8 0.8 0.8 1.0"/>  <!-- 灰色 -->
+  </material>
+  
+  <material name="camera_material">
+    <color rgba="0.2 0.2 0.6 1.0"/>  <!-- 深蓝色 -->
+  </material>
+  
+  <material name="gimbal_material">
+    <color rgba="0.9 0.5 0.1 1.0"/>  <!-- 橙色 -->
+  </material>
+
+  <!-- ========== 连杆定义 ========== -->
+  
+  <!-- 1. 里程计/世界坐标系 -->
+  <link name="odom">
+    <visual>
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+      <material name="base_material"/>
+    </visual>
+  </link>
+
+  <!-- 2. Yaw轴连杆（水平旋转部分） -->
+  <link name="gimbal_yaw_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.08" length="0.04"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="gimbal_material"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.08" length="0.04"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <!-- 3. Pitch轴连杆（俯仰旋转部分，云台主体） -->
+  <link name="gimbal_link">
+    <visual>
+      <geometry>
+        <box size="0.12 0.06 0.08"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="gimbal_material"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.12 0.06 0.08"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.2"/>
+      <inertia ixx="0.0002" ixy="0" ixz="0" iyy="0.0002" iyz="0" izz="0.0002"/>
+    </inertial>
+  </link>
+
+  <!-- 4. 相机连杆 -->
+  <link name="camera_link">
+    <visual>
+      <geometry>
+        <box size="0.05 0.03 0.03"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="camera_material"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.05 0.03 0.03"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <!-- 5. 相机光学坐标系（遵循REP 103/REP 104标准） -->
+  <link name="camera_optical_frame">
+    <visual>
+      <geometry>
+        <box size="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <!-- ========== 关节定义 ========== -->
+  
+  <!-- 关节1：Yaw轴（绕Z轴水平旋转） -->
+  <joint name="gimbal_yaw_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="odom"/>
+    <child link="gimbal_yaw_link"/>
+    <axis xyz="0 0 1"/>
+    <limit 
+      lower="-$(arg yaw_limit)" 
+      upper="$(arg yaw_limit)" 
+      effort="$(arg joint_effort)" 
+      velocity="$(arg joint_velocity)"/>
+  </joint>
+
+  <!-- 关节2：Pitch轴（绕Y轴俯仰旋转） -->
+  <joint name="gimbal_pitch_joint" type="revolute">
+    <origin xyz="0 0 0.06" rpy="0 0 0"/>  <!-- Yaw轴中心到Pitch轴的偏移 -->
+    <parent link="gimbal_yaw_link"/>
+    <child link="gimbal_link"/>
+    <axis xyz="0 1 0"/>
+    <limit 
+      lower="-$ (arg pitch_limit)" 
+      upper="$(arg pitch_limit)" 
+      effort="$(arg joint_effort)" 
+      velocity="$(arg joint_velocity)"/>
+  </joint>
+
+  <!-- 关节3：相机固定连接 -->
+  <joint name="camera_joint" type="fixed">
+    <origin xyz="$(arg camera_xyz)" rpy="$(arg camera_rpy)"/>
+    <parent link="gimbal_link"/>
+    <child link="camera_link"/>
+  </joint>
+
+  <!-- 关节4：相机光学坐标系转换 -->
+  <joint name="camera_optical_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+  </joint>
+
+</robot>
