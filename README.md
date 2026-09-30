@@ -79,7 +79,6 @@ sudo apt install -y \
   ros-foxy-cv-bridge ros-foxy-image-transport ros-foxy-image-transport-plugins \
   ros-foxy-camera-info-manager ros-foxy-vision-opencv \
   ros-foxy-tf2-ros ros-foxy-tf2-geometry-msgs ros-foxy-message-filters \
-  ros-foxy-serial-driver \
   libasio-dev libeigen3-dev
 # 或者让 rosdep 自动装：
 rosdep install --from-paths src --ignore-src -r -y

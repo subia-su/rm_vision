@@ -10,13 +10,13 @@ launch_params = yaml.safe_load(open(os.path.join(
 
 robot_description = Command(['xacro ', os.path.join(
     get_package_share_directory('rm_gimbal_description'), 'urdf', 'rm_gimbal.urdf.xacro'),
-    ' xyz:=', launch_params['odom2camera']['xyz'], ' rpy:=', launch_params['odom2camera']['rpy']])
+    ' camera_xyz:=', launch_params['odom2camera']['xyz'], ' camera_rpy:=', launch_params['odom2camera']['rpy']])
 
 robot_state_publisher = Node(
     package='robot_state_publisher',
     executable='robot_state_publisher',
     parameters=[{'robot_description': robot_description,
-                 'publish_frequency': 1000.0}]
+                 'publish_frequency': 50.0}]
 )
 
 node_params = os.path.join(

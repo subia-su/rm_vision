@@ -51,12 +51,13 @@ def generate_launch_description():
         )
 
     hik_camera_node = get_camera_node('hik_camera', 'hik_camera::HikCameraNode')
-    mv_camera_node = get_camera_node('mindvision_camera', 'mindvision_camera::MVCameraNode')
 
-    if (launch_params['camera'] == 'hik'):
-        cam_detector = get_camera_detector_container(hik_camera_node)
-    elif (launch_params['camera'] == 'mv'):
-        cam_detector = get_camera_detector_container(mv_camera_node)
+    # 仓库当前只集成海康相机驱动，camera 参数仅支持 'hik'
+    if launch_params['camera'] != 'hik':
+        raise RuntimeError(
+            "unsupported camera '%s'; only 'hik' is bundled" % launch_params['camera'])
+
+    cam_detector = get_camera_detector_container(hik_camera_node)
 
     serial_driver_node = Node(
         package='rm_serial_driver',

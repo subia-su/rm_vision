@@ -97,15 +97,15 @@ public:
           camera_pub_.publish(image_msg_, camera_info_msg_);
 
           MV_CC_FreeImageBuffer(camera_handle_, &out_frame);
-          fail_conut_ = 0;
+          fail_count_ = 0;
         } else {
           RCLCPP_WARN(this->get_logger(), "Get buffer failed! nRet: [%x]", nRet);
           MV_CC_StopGrabbing(camera_handle_);
           MV_CC_StartGrabbing(camera_handle_);
-          fail_conut_++;
+          fail_count_++;
         }
 
-        if (fail_conut_ > 5) {
+        if (fail_count_ > 5) {
           RCLCPP_FATAL(this->get_logger(), "Camera failed!");
           rclcpp::shutdown();
         }
@@ -186,7 +186,7 @@ private:
   std::unique_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
   sensor_msgs::msg::CameraInfo camera_info_msg_;
 
-  int fail_conut_ = 0;
+  int fail_count_ = 0;
   std::thread capture_thread_;
 
   OnSetParametersCallbackHandle::SharedPtr params_callback_handle_;
