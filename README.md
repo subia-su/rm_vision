@@ -5,7 +5,7 @@
 >
 > 本项目基于 [chenjunnn/rm_vision](https://github.com/chenjunnn/rm_vision) 二次开发，
 > 仓库地址：<https://github.com/subia-su/rm_vision>。
-> 本文所有命令均在 Jetson 实机上实测通过。
+> 本文保留原 Jetson 实测记录；新增通讯补丁的独立验证与实机待验范围见 §6.4。
 
 ---
 
@@ -278,7 +278,7 @@ USB/串口一次读写可能只传输部分帧，也可能合并多帧。修复�
 A5 49 F4 01 9C FF 32 00 9D 00 19 00 CE FF 00 00 78 00 1A 00 1E 00 05 00 14 C5
 ```
 
-上行参考帧（红/蓝标志取 1，reset=1，roll=0.12rad、pitch=-0.20rad、yaw=1.00rad）：
+上行参考帧（detect_color=1 蓝色，reset=1，roll=0.12rad、pitch=-0.20rad、yaw=1.00rad）：
 
 ```text
 5A 03 0C 00 EC FF 64 00 7B 00 38 FE 15 03 07 2B
