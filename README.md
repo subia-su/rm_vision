@@ -5,7 +5,7 @@
 >
 > 本项目基于 [chenjunnn/rm_vision](https://github.com/chenjunnn/rm_vision) 二次开发，
 > 仓库地址：<https://github.com/subia-su/rm_vision>。
-> 本文所有命令均在 Jetson 实机上实测通过。
+> 本文保留原 Jetson 实测记录；新增通讯补丁的独立验证与实机待验范围见 §6.4。
 
 ---
 
@@ -177,7 +177,7 @@ ros2 param set /armor_detector debug false      # 运行时关闭调试图
 | `/armor_detector` | `detect_color` | 0 | 0=红方 1=蓝方（电控可经串口下发覆盖） |
 | | `binary_thres` | 30 | 灰度阈值：太高漏检、太低噪声多 |
 | | `classifier_threshold` | 0.8 | 数字分类置信度 |
-| | `debug` | true | **正式运行务必改 false**（见下方警告） |
+| | `debug` | false | 仅在调图时开启；默认关闭以减少处理开销 |
 | `/armor_tracker` | `ekf.sigma2_q_xyz` | 0.05 | 位置过程噪声：↑跟手 ↓平滑 |
 | | `ekf.r_xyz_factor` | 4e-4 | 测量噪声：↑信模型 ↓信测量 |
 | | `tracker.max_match_distance` | 0.5 | 匹配位置差阈值 (m) |
@@ -194,23 +194,111 @@ ros2 param set /armor_detector debug false      # 运行时关闭调试图
 
 ---
 
-## 6. 串口协议（与电控约定）
+## 6. 串口协议（与当前步兵下位机核对）
 
-int16 定点协议（所有物理量 ×100，精度 0.01），定义见
-`src/rm_serial_driver/include/rm_serial_driver/packet.hpp`。
+协议定义：`src/rm_serial_driver/include/rm_serial_driver/packet.hpp`；步兵下位机对应
+`app/gimbal/vision.c` 的 `Aimbot_FeedUsb / AimbotFeedback_Update`。
+当前两端均为 **int16 ×100、数值和 CRC 小端**，不能混用旧 float32 帧。
+帧长包含帧头、标志、负载和 CRC；字节偏移从 0 开始。
 
-| 方向 | 帧头 | 长度 | 结构 |
+| 方向 | 帧头 | 总长度 | 完整组成 |
 |---|---|---|---|
-| 电控 → 视觉 `ReceivePacket` | `0x5A` | 16 B | 位域(1) + roll,pitch,yaw,aim_x,aim_y,aim_z (6×int16) + CRC16(2) |
-| 视觉 → 电控 `SendPacket` | `0xA5` | 26 B | 位域(1) + x,y,z,yaw,vx,vy,vz,v_yaw,r1,r2,dz (11×int16) + CRC16(2) |
+| 电控 → 视觉 `ReceivePacket` | `0x5A` | 16 B | 帧头(1) + flags(1) + 6×int16(12) + CRC16(2) |
+| 视觉 → 电控 `SendPacket` | `0xA5` | 26 B | 帧头(1) + flags(1) + 11×int16(22) + CRC16(2) |
 
-- 位域：`ReceivePacket` = detect_color:1 + reset_tracker:1 + reserved:6；
-  `SendPacket` = tracking:1 + id:3 + armors_num:3 + reserved:1
-- CRC16：多项式 `0x1021`（反射 `0x8408`），初值 `0xFFFF`，小端追加
-- 波特率 `115200`，8N1，无流控；帧头不符合时报 `Invalid header`，CRC 失败报 `CRC error!`
+### 6.1 标志、偏移与物理单位
 
-> 若电控固件仍是 float32 帧（28 B / 48 B）或 CRC 算法不同，会持续报
-> `CRC error!` / `Invalid header`，需两端统一协议。
+- 上行 flags（偏移 1）：bit0 `detect_color`（0 红、1 蓝），bit1 `reset_tracker`，bit2～7 保留为 0。
+- 下行 flags（偏移 1）：bit0 `tracking`，bit1～3 `id`，bit4～6 `armors_num`，bit7 保留为 0。
+  例如 tracking=1、id=4、armors_num=4 时 flags=`0x49`；不是将数量左移 3 位。
+- `id`：0 前哨站（未跟踪时空 ID 也编码为 0），1～5 编号，6 哨兵，7 基地。
+  `armors_num` 在有效跟踪时只能是 2、3 或 4；未锁定时可以为 0。
+- 发送整数 = 物理量 ×100；接收物理量 = 有符号整数 ÷100。
+  所有 float 字段采用相同缩放，但**单位不同**：角度 rad、角速度 rad/s、位置 m、速度 m/s。
+  int16 范围对应 -327.68～327.67；视觉下行保持原来的向零截断，上行由固件四舍五入。
+
+| 帧 | 字节偏移 | 字段 | 单位 / 语义 |
+|---|---|---|---|
+| 上行 | 2 / 4 / 6 | roll / pitch / yaw | rad，送入 `tf2::Quaternion::setRPY`，不能传度数 |
+| 上行 | 8 / 10 / 12 | aim_x / aim_y / aim_z | m，调试瞄准点；当前步兵固件发送 0，不代表没有目标 |
+| 上行 | 14～15 | CRC16 | 对偏移 0～13 计算，低字节在前 |
+| 下行 | 2 / 4 / 6 | x / y / z | m，`odom` 中目标中心；z 是当前被跟踪装甲板高度 |
+| 下行 | 8 | yaw | rad，目标装甲板朝向，不是云台 Yaw 指令；连续 EKF yaw 按等价周期角发送 |
+| 下行 | 10 / 12 / 14 | vx / vy / vz | m/s，目标运动速度 |
+| 下行 | 16 | v_yaw | rad/s，目标角速度 |
+| 下行 | 18 / 20 / 22 | r1 / r2 / dz | m，装甲板到中心半径及另一组装甲板高度差 |
+| 下行 | 24～25 | CRC16 | 对偏移 0～23 计算，低字节在前 |
+
+坐标约定：`odom` 为 x 前、y 左、z 上；相机光学坐标为 x 右、y 下、z 前，必须经过 TF 转换。
+正 Yaw 从上方看为逆时针；ROS 正 Pitch 绕 +y，使前向轴朝下。
+因此下位机几何角为 `yaw=atan2(y,x)`、`pitch=-atan2(z,hypot(x,y))`。
+DM4310 的机械正方向还取决于安装与固件映射，不能仅凭正负号修改电机参数。
+
+CRC：多项式 `0x1021`，按位右移实现使用反射多项式 `0x8408`，初值 `0xFFFF`，
+**无最终异或**，校验覆盖帧头、flags 和全部负载。参考：ASCII `123456789` 的 CRC=`0x6F91`。
+
+### 6.2 接口、分包与频率
+
+视觉端连接云台 C 板**原生 USB CDC**（通常 `/dev/ttyACM0`），配置 115200、8N1、无流控。
+115200 是本工程串口节点与 CDC line-coding 的约定，不是 UART 物理链路速度；它也不限制 USB
+每次读出的字节数。VT03 遥控串口、DAPLink 附带 COM 口与 VOFA 调试串口都是其他接口。
+
+USB/串口一次读写可能只传输部分帧，也可能合并多帧。修复后的驱动按实际返回长度累积、CRC
+校验后广播 TF，坏帧搜索下一个 `0x5A`；下行持续写完 26 字节。目标订阅仅保留最新一条。
+上行默认每 10 ms 尝试发送一次（约 100 Hz）；下行随 `/tracker/target` 更新，不能按固定 USB 块长解析。
+损坏包统计可用 `--ros-args --log-level serial_driver:=debug` 查看
+`Feedback frames=..., CRC errors=...`，统计最多每秒打印一次；不再逐帧刷 CRC/Invalid header 日志。
+
+### 6.3 当前下位机能力与限制
+
+当前 `AimbotSolver_Update` 校验 tracking、2/3/4 块装甲板、IMU、几何与 100 ms 本地包龄后，
+按速度和**收包后经过的时间**外推，再解算第 0 块装甲板：
+`xa=xc-r1*cos(yaw)`、`ya=yc-r1*sin(yaw)`。
+两轴使用同一目标模型，方向公式与上述 ROS 坐标约定一致。
+
+- 固件已接收 r2/dz，但当前简化解算未使用它们，也未做最优装甲板切换。
+- 当前没有弹速、重力或弹丸飞行时间补偿；“协议已匹配”不表示完整火控弹道已完成。
+- 26 字节协议没有时间戳或序列号，MCU 的包龄不是相机曝光到电机的总延迟。
+  `/latency` 是视觉电脑从目标消息时间戳到串口写完的时间，不测量 USB 到 MCU 的传输延迟。
+- ×100 的角度分辨率为 0.01 rad（约 0.573°），半径/位置分辨率为 1 cm；精瞄会受量化影响。
+  若将来升级精度，必须两端同时引入协议版本，不能只改任意一端缩放或换 float32。
+- 上位机 `tracking_thres=5` 且源码以 `detect_count > tracking_thres` 转入锁定，需初始化后
+  连续 6 次匹配；首次看到识别框不会立即输出 tracking=1。TEMP_LOST 可以继续发预测目标。
+  本次保持跟踪阈值、EKF 与 MCU PID/限速参数原样。
+
+先确认下位机 `vision_frames` 持续增长、`vision_tracking=1`、`tracking=1`（有效解算）、
+`vision_age_ms <= 100`、CRC 错误不增长，再看 Yaw/Pitch 误差是否趋零。
+故障、STOP、两轴使能与 Yaw 防发散状态必须同时查看。
+
+### 6.4 回归与部署
+
+固定参考目标帧（tracking=1，id=4，armors_num=4；x=5.00m、y=-1.00m）：
+
+```text
+A5 49 F4 01 9C FF 32 00 9D 00 19 00 CE FF 00 00 78 00 1A 00 1E 00 05 00 14 C5
+```
+
+上行参考帧（detect_color=1 蓝色，reset=1，roll=0.12rad、pitch=-0.20rad、yaw=1.00rad）：
+
+```text
+5A 03 0C 00 EC FF 64 00 7B 00 38 FE 15 03 07 2B
+```
+
+`serial_packet_stream_test` 覆盖拆包、截断/CRC 恢复、连续帧、短写、上述参考帧、位域、
+负数与越界/非有限数值。部署在视觉电脑工作区根目录：
+
+```bash
+source /opt/ros/foxy/setup.bash
+colcon build --symlink-install --packages-select rm_serial_driver rm_vision_bringup
+colcon test --packages-select rm_serial_driver
+colcon test-result --verbose
+source install/setup.bash
+# 先停止旧视觉进程，再使用 §4.1 启动完整自瞄
+```
+
+本次默认关闭检测调试图以减少处理开销。无需因这份上位机补丁重新烧录 MCU。
+Windows 主机只验证了独立 C++ 回归与当前 MCU 源码的协议兼容，完整 ROS 2 编译、Jetson
+负载与实车延迟仍须在视觉电脑/机器人上确认。
 
 ---
 
@@ -244,9 +332,9 @@ ros2 topic hz /image_raw /detector/armors /tracker/target
 **有旧进程仍占用相机**（旧 vision_bringup 的容器占着 USB 设备）：
 
 ```bash
-echo 666666 | sudo -S fuser -v /dev/bus/usb/002/003   # 查看占用进程（相机在 Bus 002）
+sudo fuser -v /dev/bus/usb/002/003   # 查看占用进程（相机在 Bus 002）
 kill <占用进程 PID>                                     # 释放相机
-echo 666666 | sudo -S usbreset 002/003                 # 重置相机 USB（或 2bdf:0001）
+sudo usbreset 002/003                 # 重置相机 USB（或 2bdf:0001）
 ```
 
 ### 7.4 跟踪器一直丢弃消息（`Message Filter dropping … 'Unknown'`）
@@ -277,7 +365,7 @@ ros2 topic hz /image_raw /detector/armors /tracker/target   # 逐级帧率定位
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | `Get buffer failed! / Camera failed!` | 相机被旧进程占用 | 按 §7.3 杀进程 + usbreset |
-| `CRC error!` / `Invalid header` | 电控协议/波特率与 §6 不符 | 核对固件帧结构；确认 `device_name` |
+| 反馈 CRC 统计持续增长 / 无有效反馈 | 协议、接口或数据流不符 | 按 §6 核对 16/26 字节帧、CRC 与原生 USB 设备 |
 | 检测输出突然停住 | `debug: true` 拖垮检测器 | `debug` 改 `false` 重启 |
 | 跟踪器疯狂 `dropping message` | 无有效电控数据 → 无云台 TF | 先修串口（§7.4） |
 | `node list` 空 / 收不到话题 | DDS 共享内存残留 | `ROS_LOCALHOST_ONLY=1` + 清理 `/dev/shm` |

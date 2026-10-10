@@ -38,6 +38,18 @@ rclcpp_components_register_node(${PROJECT_NAME}
 #############
 
 if(BUILD_TESTING)
+  enable_testing()
+  add_executable(serial_packet_stream_test
+    test/test_packet_stream_standalone.cpp
+    src/crc.cpp
+  )
+  target_include_directories(serial_packet_stream_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  # The standalone regression uses assert, including in Release builds.
+  target_compile_options(serial_packet_stream_test PRIVATE -UNDEBUG)
+  add_test(NAME serial_packet_stream_test COMMAND serial_packet_stream_test)
+
   find_package(ament_lint_auto REQUIRED)
   list(APPEND AMENT_LINT_AUTO_EXCLUDE
     ament_cmake_copyright
