@@ -1,3 +1,6 @@
+// Copyright (c) 2026 xkddyl
+// Licensed under the Apache-2.0 License.
+
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -7,7 +10,13 @@
 
 #include "rm_serial_driver/packet_stream.hpp"
 
-using namespace rm_serial_driver;
+using rm_serial_driver::fromVector;
+using rm_serial_driver::ReceivePacket;
+using rm_serial_driver::ReceivePacketParser;
+using rm_serial_driver::sendPacketFully;
+using rm_serial_driver::SendPacket;
+using rm_serial_driver::to_fixed16;
+using rm_serial_driver::toVector;
 
 static std::vector<uint8_t> feedback()
 {
@@ -124,5 +133,6 @@ int main()
     });
   } catch (const std::runtime_error &) { failed = true; }
   assert(failed);
-  std::cout << "PASS serial: split reads, CRC recovery, bursts, short writes, golden wire frames, flags, numeric guards\n";
+  std::cout << "PASS serial: split reads, CRC recovery, bursts, short writes, "
+            << "golden wire frames, flags, numeric guards\n";
 }

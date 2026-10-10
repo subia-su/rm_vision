@@ -1,3 +1,6 @@
+// Copyright (c) 2026 xkddyl
+// Licensed under the Apache-2.0 License.
+
 // Byte-stream framing for the existing 16-byte / 26-byte protocol.
 #ifndef RM_SERIAL_DRIVER__PACKET_STREAM_HPP_
 #define RM_SERIAL_DRIVER__PACKET_STREAM_HPP_
@@ -66,4 +69,4 @@ void sendPacketFully(const std::vector<uint8_t> & packet, Write write)
   }
 }
 }  // namespace rm_serial_driver
-#endif
+#endif  // RM_SERIAL_DRIVER__PACKET_STREAM_HPP_
