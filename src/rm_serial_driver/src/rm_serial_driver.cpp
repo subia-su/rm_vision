@@ -20,6 +20,7 @@
 
 #include "rm_serial_driver/crc.hpp"
 #include "rm_serial_driver/packet.hpp"
+#include "rm_serial_driver/packet_stream.hpp"
 #include "rm_serial_driver/rm_serial_driver.hpp"
 
 namespace rm_serial_driver
@@ -72,7 +73,7 @@ RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions & options)
 
   // Create Subscription
   target_sub_ = this->create_subscription<auto_aim_interfaces::msg::Target>(
-    "/tracker/target", rclcpp::SensorDataQoS(),
+    "/tracker/target", rclcpp::SensorDataQoS().keep_last(1),
     std::bind(&RMSerialDriver::sendData, this, std::placeholders::_1));
 }
 
@@ -93,24 +94,16 @@ RMSerialDriver::~RMSerialDriver()
 
 void RMSerialDriver::receiveData()
 {
-  std::vector<uint8_t> header(1);
-  std::vector<uint8_t> data;
-  data.reserve(sizeof(ReceivePacket));
+  std::vector<uint8_t> data(64);
+  ReceivePacketParser parser;
 
   while (rclcpp::ok()) {
     try {
-      serial_driver_->port()->receive(header);
-
-      if (header[0] == 0x5A) {
-        data.resize(sizeof(ReceivePacket) - 1);
-        serial_driver_->port()->receive(data);
-
-        data.insert(data.begin(), header[0]);
-        ReceivePacket packet = fromVector(data);
-
-        bool crc_ok =
-          crc16::Verify_CRC16_Check_Sum(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
-        if (crc_ok) {
+      // read_some may return a fragment, one packet, or several packets.
+      const auto received = serial_driver_->port()->receive(data);
+      for (std::size_t i = 0; i < received; ++i) {
+        ReceivePacket packet{};
+        if (parser.push(data[i], packet)) {
           if (!initial_set_param_ || packet.detect_color != previous_receive_color_) {
             setParam(rclcpp::Parameter("detect_color", packet.detect_color));
             previous_receive_color_ = packet.detect_color;
@@ -138,15 +131,15 @@ void RMSerialDriver::receiveData()
             aiming_point_.pose.position.z = from_fixed16(packet.aim_z);
             marker_pub_->publish(aiming_point_);
           }
-        } else {
-          RCLCPP_ERROR(get_logger(), "CRC error!");
         }
-      } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 20, "Invalid header: %02X", header[0]);
       }
+      RCLCPP_DEBUG_THROTTLE(
+        get_logger(), *get_clock(), 1000, "Feedback frames=%u, CRC errors=%u",
+        parser.frames(), parser.crc_errors());
     } catch (const std::exception & ex) {
       RCLCPP_ERROR_THROTTLE(
         get_logger(), *get_clock(), 20, "Error while receiving data: %s", ex.what());
+      parser.reset();
       reopenPort();
     }
   }
@@ -159,7 +152,7 @@ void RMSerialDriver::sendData(const auto_aim_interfaces::msg::Target::SharedPtr 
     {"3", 3}, {"4", 4},       {"5", 5}, {"guard", 6}, {"base", 7}};
 
   try {
-    SendPacket packet;
+    SendPacket packet{};
     packet.tracking = msg->tracking;
     packet.id = id_unit8_map.at(msg->id);
     packet.armors_num = msg->armors_num;
@@ -179,7 +172,9 @@ void RMSerialDriver::sendData(const auto_aim_interfaces::msg::Target::SharedPtr 
 
     std::vector<uint8_t> data = toVector(packet);
 
-    serial_driver_->port()->send(data);
+    sendPacketFully(data, [this](const std::vector<uint8_t> & remaining) {
+      return serial_driver_->port()->send(remaining);
+    });
 
     std_msgs::msg::Float64 latency;
     latency.data = (this->now() - msg->header.stamp).seconds() * 1000.0;
@@ -335,3 +330,4 @@ void RMSerialDriver::resetTracker()
 // This acts as a sort of entry point, allowing the component to be discoverable when its library
 // is being loaded into a running process.
 RCLCPP_COMPONENTS_REGISTER_NODE(rm_serial_driver::RMSerialDriver)
+
