@@ -67,4 +67,3 @@ ament_auto_package(
   config
   launch
 )
-

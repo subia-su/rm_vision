@@ -153,6 +153,11 @@ void RMSerialDriver::sendData(const auto_aim_interfaces::msg::Target::SharedPtr 
 
   try {
     SendPacket packet{};
+    if (msg->tracking && msg->armors_num != 2 && msg->armors_num != 3 &&
+      msg->armors_num != 4)
+    {
+      throw std::domain_error("Tracking target must contain 2, 3 or 4 armors");
+    }
     packet.tracking = msg->tracking;
     packet.id = id_unit8_map.at(msg->id);
     packet.armors_num = msg->armors_num;
@@ -160,7 +165,8 @@ void RMSerialDriver::sendData(const auto_aim_interfaces::msg::Target::SharedPtr 
     packet.x = to_fixed16(msg->position.x);
     packet.y = to_fixed16(msg->position.y);
     packet.z = to_fixed16(msg->position.z);
-    packet.yaw = to_fixed16(msg->yaw);
+    // The tracker unwraps yaw internally; send its equivalent bounded angle.
+    packet.yaw = to_fixed16(std::remainder(msg->yaw, 2.0 * std::acos(-1.0)));
     packet.vx = to_fixed16(msg->velocity.x);
     packet.vy = to_fixed16(msg->velocity.y);
     packet.vz = to_fixed16(msg->velocity.z);
@@ -168,8 +174,6 @@ void RMSerialDriver::sendData(const auto_aim_interfaces::msg::Target::SharedPtr 
     packet.r1 = to_fixed16(msg->radius_1);
     packet.r2 = to_fixed16(msg->radius_2);
     packet.dz = to_fixed16(msg->dz);
-    crc16::Append_CRC16_Check_Sum(reinterpret_cast<uint8_t *>(&packet), sizeof(packet));
-
     std::vector<uint8_t> data = toVector(packet);
 
     sendPacketFully(data, [this](const std::vector<uint8_t> & remaining) {
@@ -180,6 +184,10 @@ void RMSerialDriver::sendData(const auto_aim_interfaces::msg::Target::SharedPtr 
     latency.data = (this->now() - msg->header.stamp).seconds() * 1000.0;
     RCLCPP_DEBUG_STREAM(get_logger(), "Total latency: " + std::to_string(latency.data) + "ms");
     latency_pub_->publish(latency);
+  } catch (const std::logic_error & ex) {
+    // Invalid target data is not a USB failure. Let the MCU freshness gate expire.
+    RCLCPP_ERROR_THROTTLE(
+      get_logger(), *get_clock(), 1000, "Rejected target packet: %s", ex.what());
   } catch (const std::exception & ex) {
     RCLCPP_ERROR(get_logger(), "Error while sending data: %s", ex.what());
     reopenPort();
@@ -330,4 +338,3 @@ void RMSerialDriver::resetTracker()
 // This acts as a sort of entry point, allowing the component to be discoverable when its library
 // is being loaded into a running process.
 RCLCPP_COMPONENTS_REGISTER_NODE(rm_serial_driver::RMSerialDriver)
-

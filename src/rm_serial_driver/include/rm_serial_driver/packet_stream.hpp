@@ -26,7 +26,7 @@ public:
     if (used_ != bytes_.size()) return false;
 
     if (crc16::Verify_CRC16_Check_Sum(bytes_.data(), bytes_.size())) {
-      std::memcpy(&packet, bytes_.data(), bytes_.size());
+      packet = decodeReceivePacket(bytes_.data());
       used_ = 0;
       ++frames_;
       return true;

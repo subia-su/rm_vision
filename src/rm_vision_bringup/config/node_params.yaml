@@ -15,7 +15,8 @@
 
 /armor_detector:
   ros__parameters:
-    debug: true
+    # Enable image diagnostics only while tuning the detector.
+    debug: false
 
     detect_color: 0
     binary_thres: 30
