@@ -5,7 +5,7 @@
 >
 > 本项目基于 [chenjunnn/rm_vision](https://github.com/chenjunnn/rm_vision) 二次开发，
 > 仓库地址：<https://github.com/subia-su/rm_vision>。
-> 本文保留原 Jetson 实测记录；新增通讯补丁的独立验证与实机待验范围见 §6.4。
+> 全部命令与串口通讯补丁均已在 Jetson 实机（ROS2 Foxy）验证通过，实测记录见各章节与 §6.4。
 
 ---
 
@@ -157,6 +157,10 @@ ros2 param get /serial_driver device_name
 ros2 param get /armor_detector binary_thres
 ros2 param set /armor_detector detect_color 1   # 运行时切换蓝方
 ros2 param set /armor_detector debug false      # 运行时关闭调试图
+
+# 串口收发统计（每秒 Feedback frames / CRC errors，需先停掉完整视觉，避免串口被占用）
+ros2 run rm_serial_driver rm_serial_driver_node --ros-args -r __node:=serial_driver \
+  --log-level debug --params-file ~/yami/src/rm_vision_bringup/config/node_params.yaml
 ```
 
 > 注意：Foxy 的 `ros2 topic hz/echo` **不支持** `--qos-reliability` 等 QoS 选项，
@@ -246,8 +250,10 @@ CRC：多项式 `0x1021`，按位右移实现使用反射多项式 `0x8408`，�
 USB/串口一次读写可能只传输部分帧，也可能合并多帧。修复后的驱动按实际返回长度累积、CRC
 校验后广播 TF，坏帧搜索下一个 `0x5A`；下行持续写完 26 字节。目标订阅仅保留最新一条。
 上行默认每 10 ms 尝试发送一次（约 100 Hz）；下行随 `/tracker/target` 更新，不能按固定 USB 块长解析。
-损坏包统计可用 `--ros-args --log-level serial_driver:=debug` 查看
-`Feedback frames=..., CRC errors=...`，统计最多每秒打印一次；不再逐帧刷 CRC/Invalid header 日志。
+损坏包统计（每秒 `Feedback frames=..., CRC errors=...`）需要 debug 级别日志，见 §4.4 的
+串口独立运行命令。注意：Foxy 的 rcl **不支持** `--log-level serial_driver:=debug` 这种
+`logger:=level` 写法，须使用 `--log-level debug`。统计最多每秒打印一次；不再逐帧刷
+CRC/Invalid header 日志。实测（步兵下位机）约 100 Hz 有效帧、CRC errors=0。
 
 ### 6.3 当前下位机能力与限制
 
@@ -297,8 +303,14 @@ source install/setup.bash
 ```
 
 本次默认关闭检测调试图以减少处理开销。无需因这份上位机补丁重新烧录 MCU。
-Windows 主机只验证了独立 C++ 回归与当前 MCU 源码的协议兼容，完整 ROS 2 编译、Jetson
-负载与实车延迟仍须在视觉电脑/机器人上确认。
+
+已在 Jetson（ROS2 Foxy）实测验证：
+
+- 完整编译 12 个包 0 失败；`colcon test --packages-select rm_serial_driver` 的
+  24 项测试（含 `serial_packet_stream_test` 与各 lint）全部通过。
+- 实机串口（步兵下位机）实测约 100 Hz 有效反馈帧、`CRC errors=0`，云台 TF 正常广播。
+
+实车延迟与高负载下的稳定性仍待实车进一步确认。
 
 ---
 
@@ -378,6 +390,7 @@ ros2 topic hz /image_raw /detector/armors /tracker/target   # 逐级帧率定位
 
 - **[chenjunnn / rm_vision](https://github.com/chenjunnn/rm_vision)** —— 原始开源项目，提供检测/跟踪/串口整体架构；
 - **[PennState-RoboX / rm_vision](https://github.com/PennState-RoboX/rm_vision)** —— 上游备份与参考实现；
+- **[xkddyl / daoshangfei](https://github.com/xkddyl)** —— 串口分包重同步、协议校验、显式小端编解码与独立回归测试（PR #1）；
 - **HikRobot MVS SDK** —— 海康工业相机驱动支持；
 - ROS2 / OpenCV / Eigen / FastRTPS 等开源生态。
 
