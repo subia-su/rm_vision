@@ -19,5 +19,6 @@
 
 #include "example_interfaces.hpp"
 #include "std_msgs.hpp"
+#include "udp_msgs.hpp"
 
 #endif  // MSG_CONVERTERS__CONVERTERS_HPP_
