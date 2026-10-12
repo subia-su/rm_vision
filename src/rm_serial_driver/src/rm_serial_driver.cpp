@@ -7,7 +7,7 @@
 #include <rclcpp/qos.hpp>
 #include <rclcpp/utilities.hpp>
 #include <serial_driver/serial_driver.hpp>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 // C++ system
 #include <cmath>
