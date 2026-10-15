@@ -21,7 +21,7 @@ HikRobot 相机 ──► 装甲板检测 ──► EKF 跟踪 ──► 串口�
 | 环节 | 包 / 可执行 | 输出 | 说明 |
 |---|---|---|---|
 | 相机采集 | `hik_camera` | `/image_raw` | 1440×1080，实测约 46 Hz |
-| 装甲板检测 | `armor_detector` | `/detector/armors` | 二值化 + 灯条配对 + 数字分类 + PnP |
+| 装甲板检测 | `armor_detector` | `/detector/armors` | YOLOv8-OBB(TensorRT FP16) / 传统 CV 二值化+灯条配对+数字分类+PnP |
 | 目标跟踪 | `armor_tracker` | `/tracker/target`、`/tracker/info` | EKF 状态 `[xc vxc yc vyc za vza yaw v_yaw r]` |
 | 串口通信 | `rm_serial_driver` | 串口 `SendPacket`、`/latency` | 下发目标状态，广播云台 TF |
 
@@ -42,7 +42,7 @@ TF 树（`odom → gimbal_link → camera_link → camera_optical_frame`）：�
 ├── README.md
 ├── src/
 │   ├── rm_auto_aim/
-│   │   ├── armor_detector/          # 装甲板检测（模型 model/mlp.onnx + label.txt）
+│   │   ├── armor_detector/          # 装甲板检测（YOLOv8-OBB engine + 传统 CV mlp.onnx/label.txt）
 │   │   ├── armor_tracker/           # EKF 跟踪 + 匹配状态机
 │   │   ├── auto_aim_interfaces/     # 自定义消息 Armor/Armors/Target/TrackerInfo…
 │   │   └── rm_auto_aim/             # 元包
@@ -154,9 +154,11 @@ ros2 service call /tracker/reset std_srvs/srv/Trigger   # 重置跟踪器
 
 # 参数
 ros2 param get /serial_driver device_name
-ros2 param get /armor_detector binary_thres
-ros2 param set /armor_detector detect_color 1   # 运行时切换蓝方
-ros2 param set /armor_detector debug false      # 运行时关闭调试图
+ros2 param get /armor_detector use_yolo         # 检测模式（true=YOLO）
+ros2 param get /armor_detector yolo.target_numbers
+ros2 param get /armor_detector binary_thres     # 仅传统 CV 模式有效
+ros2 param set /armor_detector detect_color 1   # 运行时切换蓝方（两种模式共用）
+ros2 param set /armor_detector debug false      # 运行时关闭调试图（仅传统 CV）
 
 # 串口收发统计（每秒 Feedback frames / CRC errors，需先停掉完整视觉，避免串口被占用）
 ros2 run rm_serial_driver rm_serial_driver_node --ros-args -r __node:=serial_driver \
@@ -178,10 +180,14 @@ ros2 run rm_serial_driver rm_serial_driver_node --ros-args -r __node:=serial_dri
 | | `gain` | 8.0 | 增益，优先调曝光 |
 | `/serial_driver` | `device_name` | `/dev/ttyACM0` | 串口设备 |
 | | `timestamp_offset` | 0.006 | 电控↔视觉固定时延补偿 |
-| `/armor_detector` | `detect_color` | 0 | 0=红方 1=蓝方（电控可经串口下发覆盖） |
-| | `binary_thres` | 30 | 灰度阈值：太高漏检、太低噪声多 |
-| | `classifier_threshold` | 0.8 | 数字分类置信度 |
-| | `debug` | false | 仅在调图时开启；默认关闭以减少处理开销 |
+| `/armor_detector` | `use_yolo` | true | true=YOLOv8-OBB(TensorRT)；false=传统 CV |
+| | `yolo.conf_threshold` | 0.25 | YOLO 置信度阈值 |
+| | `yolo.nms_threshold` | 0.5 | YOLO NMS IoU 阈值 |
+| | `yolo.target_numbers` | `[guard,1..5]` | 3V3 白名单：哨兵 guard + 步兵 1~5；`[]`=全部 18 类 |
+| | `detect_color` | 0 | 0=红方 1=蓝方（两种模式共用，电控可经串口下发覆盖） |
+| | `binary_thres` | 30 | 灰度阈值：太高漏检、太低噪声多（仅传统 CV） |
+| | `classifier_threshold` | 0.8 | 数字分类置信度（仅传统 CV） |
+| | `debug` | false | 仅在调图时开启（仅传统 CV 有效）；默认关闭以减少处理开销 |
 | `/armor_tracker` | `ekf.sigma2_q_xyz` | 0.05 | 位置过程噪声：↑跟手 ↓平滑 |
 | | `ekf.r_xyz_factor` | 4e-4 | 测量噪声：↑信模型 ↓信测量 |
 | | `tracker.max_match_distance` | 0.5 | 匹配位置差阈值 (m) |
@@ -195,6 +201,29 @@ ros2 run rm_serial_driver rm_serial_driver_node --ros-args -r __node:=serial_dri
 > 相机满帧（~46 Hz）输入下检测器单线程执行器会被拖垮，**检测输出停滞**
 > （此时连 `ros2 param set` 都会因执行器忙而超时）。正式运行请在
 > `node_params.yaml` 中把 `debug` 改为 `false` 后启动；调试完图像参数后再按需打开。
+
+> 上述 `debug` 调试图开销警告仅针对传统 CV 模式；YOLO 模式（`use_yolo: true`）不发布调试图。
+
+### 5.1 YOLOv8-OBB 检测器（`use_yolo: true`，默认）
+
+检测器默认走 YOLOv8s-OBB + TensorRT FP16，替代传统 CV 的灯条配对。要点：
+
+- **模型**：`yolov8s_obb_fp16.engine`（~23 MiB，输入 640×640，输出 `[1,23,8400]`，
+  其中 23 = cx/cy/w/h + 18 类分数 + θ）。18 类按颜色分区：`B_*`(0~8) / `R_*`(9~17)；
+  `G`=哨兵(LARGE 225×55)、`1~5`=步兵(SMALL 135×55)、`O`=前哨站(SMALL)、`Bs/Bb`=基地(SMALL/LARGE)。
+- **engine 构建**（在训练机导出 `best.onnx` 后，于 Jetson 上执行）：
+  ```bash
+  /usr/src/tensorrt/bin/trtexec --onnx=/tmp/yolov8s.onnx \
+    --saveEngine=/tmp/yolov8s_obb_fp16.engine --fp16 \
+    --memPoolSize=workspace:2048 --tacticSources=-CUDNN --iterations=100
+  cp /tmp/yolov8s_obb_fp16.engine \
+    ~/yami/src/rm_auto_aim/armor_detector/model/yolov8s_obb_fp16.engine
+  ```
+  实测 Xavier（TRT 8.5.2 / CC 7.2）：构建约 21 分钟，GPU 推理约 16.8 ms（58.75 qps）。
+- **3V3 白名单**：`yolo.target_numbers` 默认 `["guard","1","2","3","4","5"]` 只保留哨兵 + 步兵；
+  置空 `[]` 则识别全部 18 类（含前哨站/基地）。
+- **颜色过滤**：`detect_color` 在 YOLO 模式同样生效（RED=0 只出 `R_*`，BLUE=1 只出 `B_*`）。
+- 两种模式共用 `detect_color`；`binary_thres`/`classifier_threshold`/`debug` 仅传统 CV 生效。
 
 ---
 
@@ -382,6 +411,7 @@ ros2 topic hz /image_raw /detector/armors /tracker/target   # 逐级帧率定位
 | 跟踪器疯狂 `dropping message` | 无有效电控数据 → 无云台 TF | 先修串口（§7.4） |
 | `node list` 空 / 收不到话题 | DDS 共享内存残留 | `ROS_LOCALHOST_ONLY=1` + 清理 `/dev/shm` |
 | 启动瞬间 `Message Filter dropping` | TF 尚未就绪 | 正常，1~2 秒自愈；持续则查 §7.4 |
+| 启动报 `YoloDetector: cannot open engine` / `failed to deserialize` | engine 未构建或路径不对 | 按 §5.1 构建并把 engine 放到 `model/` 目录 |
 | `Armor jump! / Reset State!` 频繁 | 云台姿态跳变 / 检测抖动 | 查电控 IMU；调 EKF 的 R/Q |
 
 ---
