@@ -22,6 +22,7 @@
 #include "armor_detector/detector.hpp"
 #include "armor_detector/number_classifier.hpp"
 #include "armor_detector/pnp_solver.hpp"
+#include "armor_detector/yolo_detector.hpp"
 #include "auto_aim_interfaces/msg/armors.hpp"
 
 namespace rm_auto_aim
@@ -36,6 +37,7 @@ private:
   void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr img_msg);
 
   std::unique_ptr<Detector> initDetector();
+  std::unique_ptr<YoloDetector> initYoloDetector();
   std::vector<Armor> detectArmors(const sensor_msgs::msg::Image::ConstSharedPtr & img_msg);
 
   void createDebugPublishers();
@@ -44,7 +46,9 @@ private:
   void publishMarkers();
 
   // Armor Detector
+  bool use_yolo_ = false;
   std::unique_ptr<Detector> detector_;
+  std::unique_ptr<YoloDetector> yolo_detector_;
 
   // Detected armors publisher
   auto_aim_interfaces::msg::Armors armors_msg_;

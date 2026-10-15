@@ -31,6 +31,23 @@ ament_auto_add_library(${PROJECT_NAME} SHARED
 target_include_directories(${PROJECT_NAME} PUBLIC ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})
 
+# TensorRT + CUDA（YOLO 检测器）
+find_library(NVINFER_LIB nvinfer)
+find_library(NVINFER_PLUGIN_LIB nvinfer_plugin)
+target_link_libraries(${PROJECT_NAME} ${NVINFER_LIB} ${NVINFER_PLUGIN_LIB})
+find_package(CUDA QUIET)
+if(CUDA_FOUND)
+  target_include_directories(${PROJECT_NAME} PUBLIC ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES})
+else()
+  # 回退：Jetson 默认 CUDA 路径
+  target_include_directories(${PROJECT_NAME} PUBLIC /usr/local/cuda/include)
+  find_library(CUDART_LIB cudart PATHS /usr/local/cuda/lib64)
+  target_link_libraries(${PROJECT_NAME} ${CUDART_LIB})
+endif()
+# TensorRT 8.5 的 enqueueV2/destroy 等 API 标记为 deprecated，但仍可用；关闭该告警（配合全局 -Werror）
+target_compile_options(${PROJECT_NAME} PRIVATE -Wno-deprecated-declarations)
+
 rclcpp_components_register_node(${PROJECT_NAME}
   PLUGIN rm_auto_aim::ArmorDetectorNode
   EXECUTABLE armor_detector_node

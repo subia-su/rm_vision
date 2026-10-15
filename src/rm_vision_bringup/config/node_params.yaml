@@ -3,6 +3,7 @@
     camera_info_url: package://rm_vision_bringup/config/camera_info.yaml
     exposure_time: 6000
     gain: 8.0
+    frame_rate: 46.0
 
 /serial_driver:
   ros__parameters:
@@ -17,6 +18,13 @@
   ros__parameters:
     # Enable image diagnostics only while tuning the detector.
     debug: false
+
+    # true: 使用 YOLOv8-OBB(TensorRT)；false: 使用传统 CV 检测器
+    use_yolo: true
+    yolo.conf_threshold: 0.25
+    yolo.nms_threshold: 0.5
+    # 3V3: 只识别哨兵(guard) + 步兵(1~5)；留空 [] 则识别全部 18 类
+    yolo.target_numbers: ["guard", "1", "2", "3", "4", "5"]
 
     detect_color: 0
     binary_thres: 30
