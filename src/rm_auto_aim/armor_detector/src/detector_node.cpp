@@ -53,6 +53,10 @@ ArmorDetectorNode::ArmorDetectorNode(const rclcpp::NodeOptions & options)
   armors_pub_ = this->create_publisher<auto_aim_interfaces::msg::Armors>(
     "/detector/armors", rclcpp::SensorDataQoS());
 
+  // YOLO 检测框可视化 publisher（供 armor_visualizer 画框 + 颜色标注）
+  yolo_boxes_pub_ = this->create_publisher<auto_aim_interfaces::msg::YoloBoxes>(
+    "/detector/yolo_boxes", 10);
+
   // Visualization Marker Publisher
   // See http://wiki.ros.org/rviz/DisplayTypes/Marker
   armor_marker_.ns = "armors";
@@ -119,6 +123,11 @@ ArmorDetectorNode::ArmorDetectorNode(const rclcpp::NodeOptions & options)
 void ArmorDetectorNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr img_msg)
 {
   auto armors = detectArmors(img_msg);
+
+  // YOLO 模式：发布原始检测框（角点 + 颜色 + 置信度）供实时可视化
+  if (use_yolo_) {
+    publishYoloBoxes(armors, img_msg->header);
+  }
 
   if (pnp_solver_ != nullptr) {
     armors_msg_.header = armor_marker_.header = text_marker_.header = img_msg->header;
@@ -320,6 +329,32 @@ void ArmorDetectorNode::publishMarkers()
   armor_marker_.action = armors_msg_.armors.empty() ? Marker::DELETE : Marker::ADD;
   marker_array_.markers.emplace_back(armor_marker_);
   marker_pub_->publish(marker_array_);
+}
+
+void ArmorDetectorNode::publishYoloBoxes(
+  const std::vector<Armor> & armors, const std_msgs::msg::Header & header)
+{
+  auto_aim_interfaces::msg::YoloBoxes msg;
+  msg.header = header;
+  for (const auto & armor : armors) {
+    auto_aim_interfaces::msg::YoloBox box;
+    box.class_name = armor.classfication_result;
+    box.number = armor.number;
+    // 类别名前缀 R_ -> 红方，B_ -> 蓝方
+    box.color = (armor.classfication_result.rfind("R_", 0) == 0) ? "RED" : "BLUE";
+    box.confidence = armor.confidence;
+    // 4 角点：左灯下、左灯上、右灯上、右灯下（原图像素坐标，yolo_detector 已映射回原图）
+    box.corners[0].x = armor.left_light.bottom.x;
+    box.corners[0].y = armor.left_light.bottom.y;
+    box.corners[1].x = armor.left_light.top.x;
+    box.corners[1].y = armor.left_light.top.y;
+    box.corners[2].x = armor.right_light.top.x;
+    box.corners[2].y = armor.right_light.top.y;
+    box.corners[3].x = armor.right_light.bottom.x;
+    box.corners[3].y = armor.right_light.bottom.y;
+    msg.boxes.emplace_back(box);
+  }
+  yolo_boxes_pub_->publish(msg);
 }
 
 }  // namespace rm_auto_aim

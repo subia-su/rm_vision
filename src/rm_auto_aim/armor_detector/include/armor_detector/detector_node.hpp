@@ -24,6 +24,7 @@
 #include "armor_detector/pnp_solver.hpp"
 #include "armor_detector/yolo_detector.hpp"
 #include "auto_aim_interfaces/msg/armors.hpp"
+#include "auto_aim_interfaces/msg/yolo_boxes.hpp"
 
 namespace rm_auto_aim
 {
@@ -44,6 +45,8 @@ private:
   void destroyDebugPublishers();
 
   void publishMarkers();
+  void publishYoloBoxes(
+    const std::vector<Armor> & armors, const std_msgs::msg::Header & header);
 
   // Armor Detector
   bool use_yolo_ = false;
@@ -53,6 +56,9 @@ private:
   // Detected armors publisher
   auto_aim_interfaces::msg::Armors armors_msg_;
   rclcpp::Publisher<auto_aim_interfaces::msg::Armors>::SharedPtr armors_pub_;
+
+  // YOLO 检测框可视化 publisher（原图坐标 OBB + 颜色 + 置信度）
+  rclcpp::Publisher<auto_aim_interfaces::msg::YoloBoxes>::SharedPtr yolo_boxes_pub_;
 
   // Visualization marker publisher
   visualization_msgs::msg::Marker armor_marker_;

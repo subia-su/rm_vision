@@ -20,6 +20,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DebugArmor.msg"
   "msg/DebugArmors.msg"
   "msg/TrackerInfo.msg"
+  "msg/YoloBox.msg"
+  "msg/YoloBoxes.msg"
 
   DEPENDENCIES
     std_msgs
