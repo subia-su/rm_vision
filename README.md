@@ -20,7 +20,7 @@ HikRobot 相机 ──► 装甲板检测 ──► EKF 跟踪 ──► 串口�
 
 | 环节 | 包 / 可执行 | 输出 | 说明 |
 |---|---|---|---|
-| 相机采集 | `hik_camera` | `/image_raw` | 1440×1080，实测约 46 Hz |
+| 相机采集 | `hik_camera` | `/image_raw` | 640×640（ROI 居中裁剪），实测约 46 Hz |
 | 装甲板检测 | `armor_detector` | `/detector/armors` | YOLOv8-OBB(TensorRT FP16) / 传统 CV 二值化+灯条配对+数字分类+PnP |
 | 目标跟踪 | `armor_tracker` | `/tracker/target`、`/tracker/info` | EKF 状态 `[xc vxc yc vyc za vza yaw v_yaw r]` |
 | 串口通信 | `rm_serial_driver` | 串口 `SendPacket`、`/latency` | 下发目标状态，广播云台 TF |
@@ -142,7 +142,7 @@ export ROS_LOCALHOST_ONLY=1
 
 ros2 node list                                  # 节点列表
 ros2 topic list                                 # 话题列表
-ros2 topic hz /image_raw                        # 相机帧率（实测 ~46 Hz）
+ros2 topic hz /image_raw                        # 相机帧率（640×640 实测 ~46 Hz；1440×1080 在 USB2 下仅 24 Hz）
 ros2 topic hz /detector/armors                  # 检测帧率
 ros2 topic hz /tracker/target                   # 跟踪帧率
 ros2 topic echo /detector/armors                # 检测结果（含每块装甲板位姿）

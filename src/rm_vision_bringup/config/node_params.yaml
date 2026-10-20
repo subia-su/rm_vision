@@ -4,6 +4,8 @@
     exposure_time: 6000
     gain: 8.0
     frame_rate: 46.0
+    width: 640
+    height: 640
 
 /serial_driver:
   ros__parameters:
