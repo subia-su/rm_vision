@@ -107,8 +107,12 @@ ArmorDetectorNode::ArmorDetectorNode(const rclcpp::NodeOptions & options)
       cam_info_sub_.reset();
     });
 
+  // 只保留最新一帧（depth 1）：46Hz 输入下处理略慢时丢弃旧帧而非积压，
+  // 避免视觉延迟随队列累积（实测 depth 5 下延迟 ~121ms）
+  auto img_qos = rclcpp::SensorDataQoS();
+  img_qos.keep_last(1);
   img_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-    "/image_raw", rclcpp::SensorDataQoS(),
+    "/image_raw", img_qos,
     std::bind(&ArmorDetectorNode::imageCallback, this, std::placeholders::_1));
 }
 
