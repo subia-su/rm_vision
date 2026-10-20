@@ -58,7 +58,8 @@ TF 树（`odom → gimbal_link → camera_link → camera_optical_frame`）：�
 │   ├── ros2_hik_camera/             # 海康相机驱动（包名 hik_camera，内含 MVS SDK）
 │   └── transport_drivers/           # serial_driver 底层（io_context/asio/udp）
 └── tools/
-    └── camera_monitor.py            # 相机实时监控（网页 / 窗口两种模式）
+    ├── camera_monitor.py            # 相机实时监控（网页 / 窗口两种模式）
+    └── armor_visualizer.py          # YOLO 检测框实时可视化（画框+颜色+置信度）
 ```
 
 ---
@@ -125,7 +126,24 @@ python3 tools/camera_monitor.py
 实测：页面实时显示画面与 FPS；接口 `/status`（JSON 状态）、`/snapshot.jpg`（单帧）可用。
 可选参数：`--port 8090` 换端口；`--mode window` 改为原生 OpenCV 窗口（需接显示器）。
 
-### 4.3 无硬件运行（只跑检测 + 跟踪）
+### 4.3 检测框可视化（YOLO 画框 + 颜色/类别/置信度）
+
+完整 vision_bringup 运行时（armor_detector 发布 `/detector/yolo_boxes`），实时观察检测效果：
+
+```bash
+cd ~/yami
+source /opt/ros/foxy/setup.bash
+source install/setup.bash
+python3 tools/armor_visualizer.py              # 网页：http://<jetson-ip>:8081/
+python3 tools/armor_visualizer.py --mode window    # 有显示器时用 OpenCV 窗口
+python3 tools/armor_visualizer.py --save /tmp/vis  # 每帧保存标注图
+```
+
+画面内容：红框=RED 装甲板、蓝框=BLUE，标注「类别 编号 颜色 置信度」，
+左上角统计红/蓝数量；接口 `/status`（fps、boxes）、`/snapshot.jpg`（单帧）。
+⚠️ 与所有 ROS 进程一样，**不要单独设置 `ROS_LOCALHOST_ONLY`**，否则收不到数据（黑屏）。
+
+### 4.4 无硬件运行（只跑检测 + 跟踪）
 
 ```bash
 cd ~/yami
@@ -134,11 +152,11 @@ source install/setup.bash
 ros2 launch rm_vision_bringup no_hardware.launch.py
 ```
 
-### 4.4 常用查看指令（均实测可用）
+### 4.5 常用查看指令（均实测可用）
 
 ```bash
 cd ~/yami && source /opt/ros/foxy/setup.bash && source install/setup.bash
-export ROS_LOCALHOST_ONLY=1
+# 注意：不要 export ROS_LOCALHOST_ONLY=1（会导致新进程收不到话题数据，见 §7.1）
 
 ros2 node list                                  # 节点列表
 ros2 topic list                                 # 话题列表
@@ -146,6 +164,7 @@ ros2 topic hz /image_raw                        # 相机帧率（640×640 实测
 ros2 topic hz /detector/armors                  # 检测帧率
 ros2 topic hz /tracker/target                   # 跟踪帧率
 ros2 topic echo /detector/armors                # 检测结果（含每块装甲板位姿）
+ros2 topic echo /detector/yolo_boxes            # YOLO 原始检测框（角点+颜色+置信度，供可视化）
 ros2 topic echo /tracker/target                 # 跟踪目标（位置/速度/yaw/半径）
 ros2 topic echo /tracker/info                   # 跟踪器状态与原始残差
 ros2 topic echo /latency                        # 视觉端总延迟 (ms)
@@ -178,10 +197,12 @@ ros2 run rm_serial_driver rm_serial_driver_node --ros-args -r __node:=serial_dri
 |---|---|---|---|
 | `/camera_node` | `exposure_time` | 6000 | 曝光 μs，让灯条饱和、背景压暗 |
 | | `gain` | 8.0 | 增益，优先调曝光 |
+| | `frame_rate` | 46.0 | 采集帧率 (Hz)；640×640 下实测 46Hz，1440×1080 在 USB2 仅 24Hz |
+| | `width` / `height` | 640 / 640 | 相机 ROI 分辨率（传感器中心裁剪），改后需按 §5.2 换算内参 |
 | `/serial_driver` | `device_name` | `/dev/ttyACM0` | 串口设备 |
 | | `timestamp_offset` | 0.006 | 电控↔视觉固定时延补偿 |
 | `/armor_detector` | `use_yolo` | true | true=YOLOv8-OBB(TensorRT)；false=传统 CV |
-| | `yolo.conf_threshold` | 0.25 | YOLO 置信度阈值 |
+| | `yolo.conf_threshold` | 0.15 | YOLO 置信度阈值（远距离召回偏低时可再调 0.10） |
 | | `yolo.nms_threshold` | 0.5 | YOLO NMS IoU 阈值 |
 | | `yolo.target_numbers` | `[guard,1..5]` | 3V3 白名单：哨兵 guard + 步兵 1~5；`[]`=全部 18 类 |
 | | `detect_color` | 0 | 0=红方 1=蓝方（两种模式共用，电控可经串口下发覆盖） |
@@ -190,12 +211,14 @@ ros2 run rm_serial_driver rm_serial_driver_node --ros-args -r __node:=serial_dri
 | | `debug` | false | 仅在调图时开启（仅传统 CV 有效）；默认关闭以减少处理开销 |
 | `/armor_tracker` | `ekf.sigma2_q_xyz` | 0.05 | 位置过程噪声：↑跟手 ↓平滑 |
 | | `ekf.r_xyz_factor` | 4e-4 | 测量噪声：↑信模型 ↓信测量 |
-| | `tracker.max_match_distance` | 0.5 | 匹配位置差阈值 (m) |
+| | `tracker.max_match_distance` | 1.0 | 匹配位置差阈值 (m)，检测跳变时调大避免频繁重置 |
+| | `tracker.max_match_yaw_diff` | 2.0 | 匹配 yaw 差阈值 (rad) |
 | | `tracker.lost_time_thres` | 1.0 | 丢失容忍时间 (s) |
 
 相机安装外参在 `src/rm_vision_bringup/config/launch_params.yaml` 的 `odom2camera`
 （默认 `xyz "0.10 0.0 0.05"`、`rpy "0.0 0.0 0.0"`，须与相机实际安装朝向一致）。
-相机内参在 `src/rm_vision_bringup/config/camera_info.yaml`（重新标定后替换）。
+相机内参在 `src/rm_vision_bringup/config/camera_info.yaml`（重新标定后替换）；
+**标定流程与建议见 [`docs/camera_calibration.md`](docs/camera_calibration.md)**（6mm 镜头 + 1/1.8" 传感器）。
 
 > ⚠️ **debug 实测警告**：`debug: true` 时检测器每帧都要编码 JPEG/Theora 多路 1080p 调试图，
 > 相机满帧（~46 Hz）输入下检测器单线程执行器会被拖垮，**检测输出停滞**
