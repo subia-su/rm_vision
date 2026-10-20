@@ -23,7 +23,7 @@
 
     # true: 使用 YOLOv8-OBB(TensorRT)；false: 使用传统 CV 检测器
     use_yolo: true
-    yolo.conf_threshold: 0.25
+    yolo.conf_threshold: 0.15
     yolo.nms_threshold: 0.5
     # 3V3: 只识别哨兵(guard) + 步兵(1~5)；留空 [] 则识别全部 18 类
     yolo.target_numbers: ["guard", "1", "2", "3", "4", "5"]
@@ -51,8 +51,8 @@
       r_yaw: 5e-3
 
     tracker:
-      max_match_distance: 0.5
-      max_match_yaw_diff: 1.0
+      max_match_distance: 1.0
+      max_match_yaw_diff: 2.0
 
       tracking_thres: 5
       lost_time_thres: 1.0
