@@ -84,6 +84,34 @@ colcon build --symlink-install
 > `transport_drivers` 以源码内嵌，无需安装 ros-foxy-serial-driver。
 > 串口权限：`sudo usermod -aG dialout $USER`（重新登录生效）。
 
+### 3.1 开机自启动（systemd）
+
+开机自动启动自瞄管线 + 网页 YOLO 检测框（无需登录）：
+
+```bash
+# 脚本与 unit 文件已在仓库 tools/ 下
+sudo cp ~/yami/tools/rm_vision.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now rm_vision     # 启用并立即启动
+
+# 管理命令
+systemctl status rm_vision                # 查看状态
+sudo systemctl restart rm_vision          # 重启
+sudo systemctl stop rm_vision             # 停止
+sudo systemctl disable rm_vision          # 取消开机自启
+
+# 日志
+tail -f ~/yami/logs/vision_bringup.log    # 管线日志
+tail -f ~/yami/logs/visualizer.log        # 可视化日志
+```
+
+- 服务在 `multi-user.target` 阶段启动，相机/串口未插时对应节点会重试，硬件就位后自动恢复。
+- bringup 异常退出时 systemd 5 秒后自动重启整套；可视化程序退出则内部自动拉起。
+- 启动脚本 `tools/auto_start.sh` 自动清理 `/dev/shm` 残留、不设 `ROS_LOCALHOST_ONLY`。
+
+> **离线无网络调车**（无路由器场景：网线直连 / USB 共享网络 / 手机热点）见
+> [`docs/offline_connection.md`](docs/offline_connection.md)。
+
 ---
 
 ## 4. 使用方法

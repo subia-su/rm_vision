@@ -1,0 +1,14 @@
+[Unit]
+Description=rm_vision auto-aim pipeline + YOLO web visualizer
+After=network.target multi-user.target
+
+[Service]
+Type=simple
+User=kami
+ExecStart=/home/kami/yami/tools/auto_start.sh
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/kami
+
+[Install]
+WantedBy=multi-user.target
